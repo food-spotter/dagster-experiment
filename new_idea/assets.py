@@ -1,4 +1,5 @@
 from dagster import AssetSelection, AutomationCondition, asset, get_dagster_logger
+from sqlalchemy import false
 
 
 # ================= RAW ASSETS =================
@@ -113,12 +114,12 @@ def int_customer_orders():
 # We only want it to run when the cron schedule is met and the upstream assets are available.
 # This ensures our common model is run only when the upstream data is ready even if it arrives later than expected
 
-target_assets = AssetSelection.assets(
-    "int_customer_orders",
-    "stg_reference_data__currency_rates",
-).downstream(include_self=False)
+prep_downstream_assets = AssetSelection.groups("dbt_prep").downstream(include_self=False)
+common_upstream_assets = AssetSelection.groups("dbt_common").upstream(include_self=True)
+# intersection_assets = prep_downstream_assets & common_upstream_assets
+target_assets = prep_downstream_assets - common_upstream_assets
 
-common_automation_condition = AutomationCondition.on_cron("50 8 * * *").allow(
+common_automation_condition = AutomationCondition.on_cron("57 17 * * *").allow(
     target_assets
 ) & AutomationCondition.all_deps_blocking_checks_passed().allow(target_assets)
 
@@ -138,14 +139,19 @@ def common_orders():
 # and the upstream assets are available. This ensures our mart is run only when
 # the upstream data is ready even if it arrives later than expected
 
-prep_downstream_assets = AssetSelection.groups("dbt_prep").downstream(include_self=True)
+prep_downstream_assets = AssetSelection.groups("dbt_prep").downstream(include_self=False)
 common_upstream_assets = AssetSelection.groups("dbt_common").upstream(include_self=True)
 # intersection_assets = prep_downstream_assets & common_upstream_assets
 target_assets = prep_downstream_assets - common_upstream_assets
 
-mart_automation_condition = AutomationCondition.on_cron("0 10 * * *").allow(
-    target_assets
+CRON_SCHEDULE = "17 18 * * *"
+mart_automation_condition = AutomationCondition.on_cron(CRON_SCHEDULE).allow(
+    target_assets,
 ) & AutomationCondition.all_deps_blocking_checks_passed().allow(target_assets)
+# .replace(
+#     old=AutomationCondition.all_deps_updated_since_cron(CRON_SCHEDULE),
+#     new=AutomationCondition.all_deps_updated_since_cron("0 0 * * *"),
+# )
 
 
 @asset(
